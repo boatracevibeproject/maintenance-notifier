@@ -1,0 +1,48 @@
+{
+    "name": "bvp/maintenance-notifier",
+    "description": "boatrace.jp のニュース一覧からメンテナンス情報を拾って Discord へ通知する",
+    "license": "MIT",
+    "type": "project",
+    "keywords": [
+        "boatrace",
+        "discord",
+        "maintenance",
+        "notifier"
+    ],
+    "authors": [
+        {
+            "name": "shimomo",
+            "email": "bvp@shimomo.net"
+        }
+    ],
+    "require": {
+        "php": "^8.3",
+        "ext-curl": "*",
+        "ext-dom": "*",
+        "ext-json": "*",
+        "ext-libxml": "*",
+        "ext-mbstring": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^12.0 || ^13.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "BVP\\MaintenanceNotifier\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "BVP\\MaintenanceNotifier\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "platform": {
+            "php": "8.3.0"
+        },
+        "sort-packages": true
+    },
+    "scripts": {
+        "test": "phpunit"
+    }
+}

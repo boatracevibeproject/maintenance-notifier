@@ -1,0 +1,105 @@
+name: Watch
+
+on:
+  schedule:
+    # 毎時 0 分（UTC）。予告メンテは数日前に出るので 1 時間刻みで十分間に合う。
+    - cron: '0 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '送らずに内容だけ確認する'
+        type: boolean
+        default: false
+      bootstrap:
+        description: '送らずに「通知済み」として記録する（初回導入用）'
+        type: boolean
+        default: false
+
+# ⭐️state/seen.json を push で更新するので、実行を重ねてはいけない。
+# cancel-in-progress は false——走っている回を殺すと「通知は送ったが記録されない」
+# 状態が生まれて次の回で二重に鳴る。
+concurrency:
+  group: watch
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  watch:
+    name: メンテナンス情報を拾う
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          # 本番（さくら）に合わせて 8.3。この仕組み単体は 8.3+ なら何でも動く。
+          php-version: '8.3'
+          extensions: curl, dom, mbstring
+          coverage: none
+
+      # 実行時の依存はゼロ（bin/watch.php が自前で autoload する）ので composer は挟まない。
+      - name: 実行する
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_MENTION: ${{ vars.DISCORD_MENTION }}
+        run: |
+          # ⚠️`[ ... ] && options=...` と書いてはいけない。schedule 起動では inputs が空で
+          # 条件が偽になり、AND リスト全体が非ゼロを返して `set -e` でステップごと落ちる。
+          options=''
+
+          if [ '${{ inputs.dry_run }}' = 'true' ]; then
+            options="${options} --dry-run"
+          fi
+
+          if [ '${{ inputs.bootstrap }}' = 'true' ]; then
+            options="${options} --bootstrap"
+          fi
+
+          php bin/watch.php ${options}
+
+      - name: 通知済みの記録をコミットする
+        run: |
+          # ⚠️`git diff` は追跡されていないファイルを見ないので、先に add してから
+          # index と比べる（state/seen.json を消して作り直した回を取りこぼさないため）。
+          git add state/seen.json
+
+          if git diff --cached --quiet -- state/seen.json; then
+            echo '記録に変化なし。'
+            exit 0
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m '通知済みのメンテナンス情報を記録する'
+
+          # concurrency で同時実行は防いでいるが、手元から push が入っていることはある。
+          # ⚠️`git push && exit 0` と書くと、失敗した回で `set -e` に掴まってリトライに入らない。
+          for attempt in 1 2 3; do
+            if git push; then
+              exit 0
+            fi
+
+            echo "push に失敗しました（${attempt} 回目）。rebase して再試行します。"
+            git pull --rebase --autostash
+          done
+
+          echo '::error::state/seen.json を push できませんでした。次の実行で同じ記事をもう一度通知します。'
+          exit 1
+
+      # 一覧の構造が変わると NewsListParser が例外を投げる。それは「拾えなくなった」という
+      # 一番気づきたい故障なので、黙ってメールだけにせず Discord にも出す。
+      - name: 失敗を Discord に流す
+        if: failure()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          [ -n "${DISCORD_WEBHOOK_URL}" ] || exit 0
+
+          curl -sS -X POST "${DISCORD_WEBHOOK_URL}" \
+            -H 'Content-Type: application/json' \
+            -d "$(jq -n --arg url "${RUN_URL}" \
+              '{content: ("⚠️ boatrace.jp のメンテナンス情報の取得に失敗しました。ページ構造が変わった可能性があります。\n" + $url)}')"

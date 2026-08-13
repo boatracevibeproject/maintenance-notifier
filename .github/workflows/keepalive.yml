@@ -1,0 +1,28 @@
+name: Keepalive
+
+on:
+  schedule:
+    - cron: '0 0 1 * *'
+  workflow_dispatch:
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+permissions:
+  actions: write
+
+# メンテナンス記事は数ヶ月に 1 本しか出ないので、state/seen.json への commit は平気で 60 日空く。
+# GitHub は 60 日コミットの無いリポジトリの schedule を止めるので、月 1 で有効化し直す。
+jobs:
+  keepalive:
+    name: Keepalive (Ubuntu 24.04)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Re-enable workflows
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow enable keepalive.yml --repo $GITHUB_REPOSITORY
+          gh workflow enable test.yml --repo $GITHUB_REPOSITORY
+          gh workflow enable watch.yml --repo $GITHUB_REPOSITORY
